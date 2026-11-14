@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<title>iPhone Cleaner</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 20px;
+    background: #101827;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 650px;
+    margin: auto;
+}
+
+header { margin-bottom: 25px; }
+
+header h1 { font-size: 27px; }
+
+header p, .small {
+    color: #9ca3af;
+}
+
+.panel {
+    background: #1f2937;
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 18px;
+}
+
+.storage {
+    font-size: 32px;
+    font-weight: bold;
+    margin: 12px 0;
+}
+
+.bar {
+    height: 12px;
+    background: #374151;
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.progress {
+    height: 100%;
+    width: 0%;
+    background: #22c55e;
+    transition: width .3s;
+}
+
+button {
+    width: 100%;
+    padding: 15px;
+    border: none;
+    border-radius: 10px;
+    background: #16a34a;
+    color: white;
+    font-size: 15px;
+    font-weight: bold;
+    margin-top: 12px;
+    cursor: pointer;
+}
+
+button.secondary { background: #374151; }
+
+button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+input[type=file] { display: none; }
+
+.stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.stat {
+    background: #374151;
+    padding: 15px;
+    border-radius: 12px;
+}
+
+.stat strong {
+    display: block;
+    font-size: 22px;
+    margin-top: 8px;
+}
+
+.file {
+    background: #374151;
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 10px;
+    overflow-wrap: anywhere;
+}
+
+.file-preview {
+    width: 75px;
+    height: 75px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-top: 8px;
+}
+
+.duplicate {
+    border: 1px solid #f59e0b;
+}
+
+.warning {
+    color: #fbbf24;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.success { color: #4ade80; }
+.error { color: #f87171; }
+
+#status {
+    margin-top: 12px;
+    font-size: 13px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<header>
+    <h1>🧹 iPhone Cleaner</h1>
+    <p>Administrador inteligente de almacenamiento</p>
+</header>
+
+<section class="panel">
+    <h3>📱 Analizador de archivos</h3>
+
+    <p class="small">
+        Selecciona fotografías y videos para analizar su tamaño
+        y buscar archivos duplicados.
+    </p>
+
+    <div class="storage" id="total">0 MB</div>
+
+    <div class="bar">
+        <div class="progress" id="progress"></div>
+    </div>
+
+    <p class="small" id="count">
+        No hay archivos seleccionados.
+    </p>
+
+    <button id="selectButton">
+        SELECCIONAR ARCHIVOS
+    </button>
+
+    <input
+        type="file"
+        id="files"
+        accept="image/*,video/*"
+        multiple
+    >
+
+    <p id="status"></p>
+</section>
+
+<section class="stats">
+
+    <div class="stat">
+        📸 Fotografías
+        <strong id="photos">0</strong>
+    </div>
+
+    <div class="stat">
+        🎬 Videos
+        <strong id="videos">0</strong>
+    </div>
+
+    <div class="stat">
+        💾 Espacio seleccionado
+        <strong id="used">0 MB</strong>
+    </div>
+
+    <div class="stat">
+        🔎 Archivos duplicados
+        <strong id="duplicates">0</strong>
+    </div>
+
+</section>
+
+<section class="panel">
+    <h3>📂 Archivos encontrados</h3>
+
+    <div id="results">
+        <p class="small">
+            Selecciona archivos para comenzar.
+        </p>
+    </div>
+
+    <button class="secondary" id="clearButton">
+        LIMPIAR LISTA
+    </button>
+</section>
+
+<section class="panel">
+    <h3>🛡️ Seguridad</h3>
+
+    <p class="warning">
+        Esta versión analiza únicamente los archivos que
+        seleccionas. No elimina ni modifica los originales.
+    </p>
+
+    <p class="small">
+        Para evitar consumir demasiada memoria, los archivos
+        mayores de 250 MB se contabilizan, pero no se comparan
+        mediante SHA-256 en esta versión.
+    </p>
+</section>
+
+</div>
+
+<script>
+
+const input = document.getElementById("files");
+const selectButton = document.getElementById("selectButton");
+const clearButton = document.getElementById("clearButton");
+
+let selectedFiles = [];
+let objectUrls = [];
+
+function formatSize(bytes) {
+
+    if (bytes < 1024 * 1024) {
+        return (bytes / 1024).toFixed(2) + " KB";
+    }
+
+    return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+}
+
+function releasePreviews() {
+
+    objectUrls.forEach(url => URL.revokeObjectURL(url));
+    objectUrls = [];
+
+}
+
+selectButton.addEventListener("click", () => {
+    input.click();
+});
+
+input.addEventListener("change", async function() {
+
+    selectedFiles = Array.from(input.files);
+
+    releasePreviews();
+
+    await analyzeFiles();
+
+});
+
+async function analyzeFiles() {
+
+    const results = document.getElementById("results");
+    const status = document.getElementById("status");
+
+    let photos = 0;
+    let videos = 0;
+    let total = 0;
+    let duplicateGroups = {};
+
+    results.innerHTML = "";
+
+    document.getElementById("progress").style.width = "0%";
+
+    selectButton.disabled = true;
+    clearButton.disabled = true;
+
+    if (selectedFiles.length === 0) {
+
+        status.textContent = "No hay archivos para analizar.";
+
+        selectButton.disabled = false;
+        clearButton.disabled = false;
+
+        return;
+    }
+
+    status.textContent = "Preparando análisis...";
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+
+        const file = selectedFiles[i];
+
+        total += file.size;
+
+        if (file.type.startsWith("image/")) photos++;
+
+        if (file.type.startsWith("video/")) videos++;
+
+        let hash = null;
+        let fileStatus = "";
+
+        try {
+
+            if (file.size > 250 * 1024 * 1024) {
+
+                fileStatus = "No verificado: supera 250 MB";
+
+            } else {
+
+                status.textContent =
+                    "Analizando archivo " + (i + 1) +
+                    " de " + selectedFiles.length + "...";
+
+                const buffer = await file.arrayBuffer();
+
+                const digest = await crypto.subtle.digest(
+                    "SHA-256",
+                    buffer
+                );
+
+                hash = Array.from(new Uint8Array(digest))
+                    .map(byte => byte.toString(16).padStart(2, "0"))
+                    .join("");
+
+                if (!duplicateGroups[hash]) {
+                    duplicateGroups[hash] = [];
+                }
+
+                duplicateGroups[hash].push(file);
+
+                fileStatus = "Contenido verificado";
+
+            }
+
+        } catch (error) {
+
+            fileStatus = "No se pudo verificar";
+
+        }
+
+        const item = document.createElement("div");
+        item.className = "file";
+
+        const name = document.createElement("strong");
+        name.textContent = file.name;
+
+        const details = document.createElement("div");
+        details.className = "small";
+        details.textContent =
+            formatSize(file.size) + " | " +
+            (file.type || "Tipo desconocido");
+
+        const verification = document.createElement("div");
+        verification.className = "small";
+        verification.textContent = fileStatus;
+
+        item.appendChild(name);
+        item.appendChild(details);
+        item.appendChild(verification);
+
+        if (file.type.startsWith("image/")) {
+
+            const preview = document.createElement("img");
+
+            const url = URL.createObjectURL(file);
+
+            objectUrls.push(url);
+
+            preview.src = url;
+            preview.className = "file-preview";
+
+            item.appendChild(preview);
+
+        }
+
+        results.appendChild(item);
+
+        const percentage =
+            ((i + 1) / selectedFiles.length) * 100;
+
+        document.getElementById("progress").style.width =
+            percentage + "%";
+
+    }
+
+    let duplicateCount = 0;
+
+    Object.values(duplicateGroups).forEach(group => {
+
+        if (group.length > 1) {
+
+            duplicateCount += group.length - 1;
+
+            group.forEach(file => {
+
+                const items = Array.from(
+                    results.querySelectorAll(".file")
+                );
+
+                const matchingItem = items.find(item =>
+                    item.querySelector("strong").textContent === file.name &&
+                    item.querySelector(".small").textContent.startsWith(
+                        formatSize(file.size)
+                    )
+                );
+
+                if (matchingItem) {
+                    matchingItem.classList.add("duplicate");
+                }
+
+            });
+
+        }
+
+    });
+
+    document.getElementById("total").textContent =
+        formatSize(total);
+
+    document.getElementById("used").textContent =
+        formatSize(total);
+
+    document.getElementById("photos").textContent = photos;
+
+    document.getElementById("videos").textContent = videos;
+
+    document.getElementById("duplicates").textContent =
+        duplicateCount;
+
+    document.getElementById("count").textContent =
+        selectedFiles.length + " archivos seleccionados";
+
+    status.textContent =
+        "Análisis terminado. " + duplicateCount +
+        " archivos repetidos adicionales encontrados.";
+
+    status.className = "success";
+
+    selectButton.disabled = false;
+    clearButton.disabled = false;
+
+}
+
+function clearFiles() {
+
+    selectedFiles = [];
+
+    input.value = "";
+
+    releasePreviews();
+
+    document.getElementById("results").innerHTML =
+        '<p class="small">No hay archivos seleccionados.</p>';
+
+    document.getElementById("total").textContent = "0 MB";
+    document.getElementById("used").textContent = "0 MB";
+
+    document.getElementById("photos").textContent = "0";
+    document.getElementById("videos").textContent = "0";
+    document.getElementById("duplicates").textContent = "0";
+
+    document.getElementById("count").textContent =
+        "No hay archivos seleccionados.";
+
+    document.getElementById("progress").style.width = "0%";
+
+    document.getElementById("status").textContent = "";
+
+}
+
+clearButton.addEventListener("click", clearFiles);
+
+</script>
+<script>
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker.register("./sw.js")
+                .then(() => console.log("iPhone Cleaner: modo PWA activado"))
+                .catch(error => console.error("Error PWA:", error));
+        });
+    }
+    </script>
+</body>
+</html>
